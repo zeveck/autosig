@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """
 AutoSig - Automatic signature placement on image files
-Processes PSD/PNG files in a directory and adds a signature (PSD/PNG) with customizable positioning and file handling
+Processes images in multiple formats (PSD, PNG, JPG, WEBP, BMP, TIFF, GIF) and adds signatures with customizable positioning and file handling
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.2"
 
 import os
 import sys
 import argparse
 import warnings
+import threading
+import time
 from pathlib import Path
 from PIL import Image
 from psd_tools import PSDImage
@@ -17,19 +19,108 @@ from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from tqdm import tqdm
 
+# Standard imports only - using Ctrl+C for cancellation
+
 # Suppress harmless PSD library warnings about unknown resources
 warnings.filterwarnings("ignore", message="Unknown image resource.*")
 
+# Supported input formats
+ALL_SUPPORTED_FORMATS = ["psd", "png", "jpg", "jpeg", "webp", "bmp", "tiff", "tif", "gif"]
 
-def load_image_file(file_path):
+def normalize_input_formats(format_list):
     """
-    Load an image file (PSD or PNG) and return as PIL Image
+    Normalize format list to handle aliases (jpeg/jpg, tiff/tif)
     
     Args:
-        file_path (str): Path to image file
+        format_list (list): List of format strings
+        
+    Returns:
+        list: Normalized format list with aliases expanded
+    """
+    if not format_list:
+        return ALL_SUPPORTED_FORMATS.copy()
+    
+    # Handle aliases
+    aliases = {
+        'jpeg': ['jpg', 'jpeg'],
+        'jpg': ['jpg', 'jpeg'], 
+        'tiff': ['tiff', 'tif'],
+        'tif': ['tiff', 'tif']
+    }
+    
+    normalized = set()
+    for fmt in format_list:
+        fmt_lower = fmt.lower().strip()
+        if fmt_lower in ALL_SUPPORTED_FORMATS:
+            if fmt_lower in aliases:
+                normalized.update(aliases[fmt_lower])
+            else:
+                normalized.add(fmt_lower)
+        else:
+            raise ValueError(f"Unsupported format '{fmt}'. Supported formats: {', '.join(ALL_SUPPORTED_FORMATS)}")
+    
+    return list(normalized)
+
+
+def hide_layers_in_psd(psd, layers_to_hide):
+    """
+    Hide specified layers in PSD before composite
+    
+    Args:
+        psd: PSDImage object
+        layers_to_hide: List of layer names or indices to hide
+    
+    Returns:
+        int: Number of layers successfully hidden
+    """
+    if not layers_to_hide:
+        return 0
+    
+    hidden_count = 0
+    
+    for layer_spec in layers_to_hide:
+        if isinstance(layer_spec, str) and layer_spec.isdigit():
+            # Convert string digits to int
+            layer_spec = int(layer_spec)
+        
+        if isinstance(layer_spec, int):
+            # Hide by index (0-based)
+            if 0 <= layer_spec < len(psd):
+                psd[layer_spec].visible = False
+                hidden_count += 1
+            else:
+                tqdm.write(f"Warning: Layer index {layer_spec} out of range (0-{len(psd)-1})")
+        else:
+            # Hide by name (case-insensitive)
+            found = False
+            for layer in psd:
+                if hasattr(layer, 'name') and layer.name and layer.name.lower() == str(layer_spec).lower():
+                    layer.visible = False
+                    hidden_count += 1
+                    found = True
+                    break
+            
+            if not found:
+                tqdm.write(f"Warning: Layer '{layer_spec}' not found in PSD")
+    
+    return hidden_count
+
+
+def load_image_file(file_path, layers_to_hide=None):
+    """
+    Load an image file in any supported format and return as PIL Image
+    
+    Args:
+        file_path (str): Path to image file (PSD, PNG, JPG, WEBP, BMP, TIFF, GIF)
+        layers_to_hide (list): List of layer names or indices to hide (PSD only)
         
     Returns:
         PIL.Image: Loaded image in RGBA format
+        
+    Note:
+        - PSD files support layer hiding before composite
+        - Animated GIFs automatically use first frame with warning
+        - All formats normalized to RGBA for consistent processing
     """
     file_ext = Path(file_path).suffix.lower()
     
@@ -37,9 +128,29 @@ def load_image_file(file_path):
         # Suppress stdout/stderr during PSD loading to hide unknown resource warnings
         with redirect_stderr(StringIO()), redirect_stdout(StringIO()):
             psd = PSDImage.open(file_path)
+            
+            # Hide specified layers before compositing
+            if layers_to_hide:
+                hidden_count = hide_layers_in_psd(psd, layers_to_hide)
+                if hidden_count > 0:
+                    tqdm.write(f"Hidden {hidden_count} layer(s) in {Path(file_path).name}")
+            
             return psd.composite().convert("RGBA")
     else:
-        return Image.open(file_path).convert("RGBA")
+        # Non-PSD files don't have layers, ignore layer hiding
+        if layers_to_hide:
+            tqdm.write(f"Warning: Layer hiding only supported for PSD files, ignored for {Path(file_path).name}")
+        
+        img = Image.open(file_path)
+        
+        # Check for animated GIF and warn user
+        if file_ext == '.gif':
+            is_animated = getattr(img, "is_animated", False)
+            frame_count = getattr(img, "n_frames", 1)
+            if is_animated and frame_count > 1:
+                tqdm.write(f"Warning: Animated GIF detected ({frame_count} frames), using first frame only: {Path(file_path).name}")
+        
+        return img.convert("RGBA")
 
 
 def generate_output_path(input_path, suffix, output_format):
@@ -195,6 +306,83 @@ def is_likely_autosig_output(file_path, current_suffix, exclude_patterns=None):
     return False
 
 
+def detect_orientation(width, height):
+    """
+    Classify image orientation
+    
+    Args:
+        width (int): Image width
+        height (int): Image height
+        
+    Returns:
+        str: "landscape", "portrait", or "square"
+    """
+    ratio = width / height
+    if ratio > 1.2:
+        return "landscape"
+    elif ratio < 0.8:
+        return "portrait"
+    else:
+        return "square"
+
+
+def parse_aspect_ratio(ratio_str):
+    """
+    Parse aspect ratio string like "4:5" or "16:9"
+    
+    Args:
+        ratio_str (str): Ratio in format "width:height" or decimal number
+        
+    Returns:
+        float: Aspect ratio as width/height
+    """
+    if ":" in ratio_str:
+        try:
+            w, h = map(float, ratio_str.split(":"))
+            if h == 0:
+                raise ValueError("Height cannot be zero")
+            return w / h
+        except ValueError:
+            raise ValueError(f"Invalid aspect ratio format: {ratio_str}")
+    else:
+        try:
+            return float(ratio_str)
+        except ValueError:
+            raise ValueError(f"Invalid aspect ratio format: {ratio_str}")
+
+
+def center_crop_to_max_ratio(image, max_ratio, orientation):
+    """
+    Center crop image only if it exceeds the maximum aspect ratio for its orientation
+    
+    Args:
+        image (PIL.Image): PIL Image object
+        max_ratio (float): Maximum allowed aspect ratio (width/height)
+        orientation (str): "portrait", "landscape", or "square"
+    
+    Returns:
+        PIL.Image: Cropped image (only if needed) or original
+    """
+    current_ratio = image.width / image.height
+    
+    # Only crop if image exceeds the maximum ratio for its orientation
+    if orientation in ["portrait", "square"] and current_ratio < max_ratio:
+        # Portrait/square image too tall (ratio too small) - crop height
+        new_height = int(image.width / max_ratio)
+        if new_height < image.height:  # Only crop if needed
+            top = (image.height - new_height) // 2
+            return image.crop((0, top, image.width, top + new_height))
+    elif orientation == "landscape" and current_ratio > max_ratio:
+        # Landscape image too wide (ratio too large) - crop width
+        new_width = int(image.height * max_ratio)
+        if new_width < image.width:  # Only crop if needed
+            left = (image.width - new_width) // 2
+            return image.crop((left, 0, left + new_width, image.height))
+    
+    # Image is within acceptable ratio limits, no cropping needed
+    return image
+
+
 def resize_image_if_needed(image, max_dimension):
     """
     Resize image if its larger dimension exceeds max_dimension, maintaining aspect ratio
@@ -226,13 +414,13 @@ def resize_image_if_needed(image, max_dimension):
     return image.resize((new_width, new_height), Image.LANCZOS)
 
 
-def process_image_files(directory, signature_path, offset_pixels=20, offset_percent=None, max_dimension=None, suffix="_with_sig", force=False, skip_existing=False, output_format="png", quality=85, exclude_patterns=None):
+def process_image_files(directory, signature_path=None, offset_pixels=20, offset_percent=None, max_dimension=None, suffix="_with_sig", force=False, skip_existing=False, output_format="png", quality=85, exclude_patterns=None, apply_signature=True, layers_to_hide=None, crop_portrait_ratio=None, crop_landscape_ratio=None, input_formats=None):
     """
-    Process all PSD/PNG files in the specified directory and add signature
+    Process image files in the specified directory with optional signature application
     
     Args:
         directory (str): Path to directory containing image files
-        signature_path (str): Path to signature file (PSD or PNG)
+        signature_path (str): Path to signature file (PSD or PNG) - None if apply_signature=False
         offset_pixels (int): Pixel offset from right and bottom edges (default: 20)
         offset_percent (float): Percentage offset from right and bottom edges (overrides pixels if provided)
         max_dimension (int): Maximum size for larger dimension, maintains aspect ratio (None to skip resizing)
@@ -242,108 +430,165 @@ def process_image_files(directory, signature_path, offset_pixels=20, offset_perc
         output_format (str): Output format - png, jpg, webp, tiff (default: "png")
         quality (int): Quality for lossy formats 1-100 (default: 85)
         exclude_patterns (list): Additional suffix patterns to exclude from input scanning
+        apply_signature (bool): If True, apply signature to images (default: True)
+        layers_to_hide (list): List of layer names or indices to hide in PSD files
+        crop_portrait_ratio (str): Maximum aspect ratio for portrait/square images (e.g., "4:5")
+        crop_landscape_ratio (str): Maximum aspect ratio for landscape images (e.g., "16:9")
+        input_formats (list): List of input formats to process (default: all supported formats)
     """
     if not os.path.exists(directory):
         print(f"Error: Directory '{directory}' does not exist")
         return
     
-    if not os.path.exists(signature_path):
-        print(f"Error: Signature file '{signature_path}' does not exist")
-        return
+    # Load signature image only if applying signature
+    signature = None
+    if apply_signature:
+        if not signature_path or not os.path.exists(signature_path):
+            print(f"Error: Signature file '{signature_path}' does not exist")
+            return
+        
+        try:
+            signature = load_image_file(signature_path)
+            sig_ext = Path(signature_path).suffix.lower()
+            print(f"Loaded {sig_ext.upper()} signature: {signature.size[0]}x{signature.size[1]} pixels")
+        except Exception as e:
+            print(f"Error loading signature file: {e}")
+            return
     
-    # Load signature image
+    # Normalize and validate input formats
     try:
-        signature = load_image_file(signature_path)
-        sig_ext = Path(signature_path).suffix.lower()
-        print(f"Loaded {sig_ext.upper()} signature: {signature.size[0]}x{signature.size[1]} pixels")
-    except Exception as e:
-        print(f"Error loading signature file: {e}")
-        return
+        if input_formats:
+            # Parse comma-separated format list
+            format_list = [fmt.strip() for fmt in input_formats.split(',')]
+            normalized_formats = normalize_input_formats(format_list)
+        else:
+            normalized_formats = normalize_input_formats(None)  # All formats
+    except ValueError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
     
-    # Find all image files in directory (PSD and PNG)
+    # Find all image files in directory for specified formats
     image_files = []
-    image_files.extend(Path(directory).glob("*.psd"))
+    all_files_by_format = {}
     
-    # Filter PNG files to exclude likely AutoSig outputs
-    all_png_files = list(Path(directory).glob("*.png"))
-    filtered_png_files = [
-        f for f in all_png_files 
-        if not is_likely_autosig_output(f, suffix, exclude_patterns)
-    ]
-    image_files.extend(filtered_png_files)
-    
-    # Report any excluded files for transparency
-    excluded_count = len(all_png_files) - len(filtered_png_files)
-    if excluded_count > 0:
-        print(f"Excluded {excluded_count} PNG files that appear to be AutoSig outputs")
+    for fmt in normalized_formats:
+        pattern = f"*.{fmt}"
+        found_files = list(Path(directory).glob(pattern))
+        all_files_by_format[fmt] = found_files
+        
+        # Apply AutoSig output filtering to all formats (not just PNG)
+        filtered_files = [
+            f for f in found_files 
+            if not is_likely_autosig_output(f, suffix, exclude_patterns)
+        ]
+        image_files.extend(filtered_files)
+        
+        # Report excluded files for transparency
+        excluded_count = len(found_files) - len(filtered_files)
+        if excluded_count > 0:
+            print(f"Excluded {excluded_count} {fmt.upper()} files that appear to be AutoSig outputs")
     
     if not image_files:
-        print(f"No PSD or PNG files found in '{directory}'")
+        format_names = ', '.join(normalized_formats).upper()
+        print(f"No {format_names} files found in '{directory}'")
         return
     
     print(f"Found {len(image_files)} image files to process")
+    print("Press Ctrl+C to cancel processing at any time")
     
     # Track processing results
     processed_count = 0
     skipped_files = []
     global_action = None
+    cancelled = False
     
-    for image_file in tqdm(image_files, desc="Processing images", unit="file"):
-        try:
-            # Load image file
-            source_image = load_image_file(image_file)
+    try:
+        for image_file in tqdm(image_files, desc="Processing images (Ctrl+C to cancel)", unit="file"):
             
-            # Calculate signature position based on offset type
-            if offset_percent is not None:
-                # Use percentage offset
-                offset_x = int(source_image.width * (offset_percent / 100))
-                offset_y = int(source_image.height * (offset_percent / 100))
-            else:
-                # Use pixel offset
-                offset_x = offset_pixels
-                offset_y = offset_pixels
+            try:
+                # Load image file with layer hiding if specified
+                source_image = load_image_file(image_file, layers_to_hide)
+                
+                # Create a copy of the original image for processing
+                result_image = source_image.copy()
+                
+                # Apply aspect ratio cropping if specified
+                if crop_portrait_ratio or crop_landscape_ratio:
+                    orientation = detect_orientation(result_image.width, result_image.height)
+                    
+                    if orientation in ["portrait", "square"] and crop_portrait_ratio:
+                        try:
+                            max_ratio = parse_aspect_ratio(crop_portrait_ratio)
+                            result_image = center_crop_to_max_ratio(result_image, max_ratio, orientation)
+                        except ValueError as e:
+                            tqdm.write(f"Warning: Invalid portrait ratio '{crop_portrait_ratio}': {e}")
+                    
+                    elif orientation == "landscape" and crop_landscape_ratio:
+                        try:
+                            max_ratio = parse_aspect_ratio(crop_landscape_ratio)
+                            result_image = center_crop_to_max_ratio(result_image, max_ratio, orientation)
+                        except ValueError as e:
+                            tqdm.write(f"Warning: Invalid landscape ratio '{crop_landscape_ratio}': {e}")
+                
+                # Apply signature if requested
+                if apply_signature and signature:
+                    # Calculate signature position based on offset type
+                    if offset_percent is not None:
+                        # Use percentage offset
+                        offset_x = int(source_image.width * (offset_percent / 100))
+                        offset_y = int(source_image.height * (offset_percent / 100))
+                    else:
+                        # Use pixel offset
+                        offset_x = offset_pixels
+                        offset_y = offset_pixels
+                    
+                    sig_x = source_image.width - signature.width - offset_x
+                    sig_y = source_image.height - signature.height - offset_y
+                    
+                    # Ensure signature fits within image bounds
+                    if sig_x < 0 or sig_y < 0:
+                        tqdm.write(f"Warning: Signature too large for {image_file.name}, skipping")
+                        continue
+                    
+                    # Paste signature onto image with alpha blending
+                    result_image.paste(signature, (sig_x, sig_y), signature)
+                
+                # Resize the final composite image if needed
+                result_image = resize_image_if_needed(result_image, max_dimension)
+                
+                # Generate output path with suffix and format
+                output_path = generate_output_path(image_file, suffix, output_format)
+                
+                # Handle file conflicts
+                if global_action == 'overwrite_all':
+                    should_process = True
+                elif global_action == 'skip_all':
+                    should_process = False
+                else:
+                    should_process, new_global_action = handle_file_conflict(output_path, force, skip_existing)
+                    if new_global_action:
+                        global_action = new_global_action
+                
+                if should_process:
+                    # Save in specified format
+                    save_image_with_format(result_image, output_path, output_format, quality)
+                    processed_count += 1
+                else:
+                    skipped_files.append(output_path.name)
+                    continue
             
-            sig_x = source_image.width - signature.width - offset_x
-            sig_y = source_image.height - signature.height - offset_y
-            
-            # Ensure signature fits within image bounds
-            if sig_x < 0 or sig_y < 0:
-                tqdm.write(f"Warning: Signature too large for {image_file.name}, skipping")
+            except Exception as e:
+                tqdm.write(f"Error processing {image_file.name}: {e}")
                 continue
-            
-            # Create a copy of the original image for compositing
-            result_image = source_image.copy()
-            
-            # Paste signature onto image with alpha blending
-            result_image.paste(signature, (sig_x, sig_y), signature)
-            
-            # Resize the final composite image if needed
-            result_image = resize_image_if_needed(result_image, max_dimension)
-            
-            # Generate output path with suffix and format
-            output_path = generate_output_path(image_file, suffix, output_format)
-            
-            # Handle file conflicts
-            if global_action == 'overwrite_all':
-                should_process = True
-            elif global_action == 'skip_all':
-                should_process = False
-            else:
-                should_process, new_global_action = handle_file_conflict(output_path, force, skip_existing)
-                if new_global_action:
-                    global_action = new_global_action
-            
-            if should_process:
-                # Save in specified format
-                save_image_with_format(result_image, output_path, output_format, quality)
-                processed_count += 1
-            else:
-                skipped_files.append(output_path.name)
-                continue
-            
-        except Exception as e:
-            tqdm.write(f"Error processing {image_file.name}: {e}")
-            continue
+    
+    except KeyboardInterrupt:
+        # Handle Ctrl+C cancellation
+        print(f"\n\nProcessing cancelled by user (Ctrl+C)")
+        print(f"Successfully processed: {processed_count} files")
+        print(f"Remaining files: {len(image_files) - processed_count - len(skipped_files)}")
+        if skipped_files:
+            print(f"Previously skipped: {len(skipped_files)} files")
+        return
     
     # Print summary
     print(f"\nProcessing complete!")
@@ -362,7 +607,7 @@ def process_image_files(directory, signature_path, offset_pixels=20, offset_perc
 def main():
     """Main function with command line argument parsing"""
     parser = argparse.ArgumentParser(
-        description="Add signature to PSD/PNG files and export in multiple formats",
+        description="Add signature to images in multiple formats and export with advanced processing",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -371,19 +616,28 @@ Examples:
   python autosig.py /photos signature.png --percent 5
   python autosig.py images sig.png --max-dimension 2000
   python autosig.py photos sig.png --suffix \"_signed\" --force
-  python autosig.py images sig.png --format jpg --quality 90
+  python autosig.py images sig.png --output-format jpg --quality 90
   python autosig.py photos sig.png --exclude-suffix "_draft"
+  python autosig.py images/ --no-sig --output-format jpg --max-dimension 2000
+  python autosig.py psds/ --no-sig --output-format png --suffix "_converted"
+  python autosig.py psds/ sig.png --hide-layer "Signature" --hide-layer "Watermark"
+  python autosig.py images/ --no-sig --hide-layer 0 --hide-layer 3
+  python autosig.py photos/ sig.png --crop-portrait 4:5 --crop-landscape 16:9
+  python autosig.py images/ --no-sig --crop-portrait 1:1 --output-format jpg
+  python autosig.py photos/ sig.png --input-formats jpg,png --output-format webp
+  python autosig.py archive/ --no-sig --input-formats bmp,tiff --output-format png
         """
     )
     
     parser.add_argument(
         "directory",
-        help="Directory containing PSD/PNG files to process"
+        help="Directory containing image files to process (PSD, PNG, JPG, WEBP, BMP, TIFF, GIF)"
     )
     
     parser.add_argument(
         "signature",
-        help="Path to signature file (PSD or PNG)"
+        nargs="?",
+        help="Path to signature file (PSD or PNG) - optional if --no-sig specified"
     )
     
     parser.add_argument(
@@ -432,11 +686,17 @@ Examples:
     )
     
     parser.add_argument(
-        "--format", "-fmt",
+        "--output-format", "-of",
         type=str,
         choices=["png", "jpg", "webp", "tiff"],
         default="png",
         help="Output format (default: png)"
+    )
+    
+    parser.add_argument(
+        "--input-formats", "-if",
+        type=str,
+        help="Process only these input formats (comma-separated). Default: all supported formats (psd,png,jpg,jpeg,webp,bmp,tiff,tif,gif)"
     )
     
     parser.add_argument(
@@ -447,12 +707,46 @@ Examples:
     )
     
     parser.add_argument(
+        "--no-sig",
+        action="store_true",
+        help="Process images without applying signature (useful for format conversion, resizing, etc.)"
+    )
+    
+    parser.add_argument(
+        "--hide-layer",
+        type=str,
+        action="append",
+        help="Hide PSD layer by name or index before processing (can be used multiple times)"
+    )
+    
+    parser.add_argument(
+        "--crop-portrait",
+        type=str,
+        help="Maximum aspect ratio for portrait/square images (e.g., '4:5')"
+    )
+    
+    parser.add_argument(
+        "--crop-landscape", 
+        type=str,
+        help="Maximum aspect ratio for landscape images (e.g., '16:9')"
+    )
+    
+    parser.add_argument(
         "--version", "-v",
         action="version",
         version=f"AutoSig {__version__}"
     )
     
     args = parser.parse_args()
+    
+    # Validate --no-sig and signature requirements
+    if args.no_sig and args.signature:
+        print("Error: Cannot specify both --no-sig and signature file")
+        sys.exit(1)
+    
+    if not args.no_sig and not args.signature:
+        print("Error: Signature file required unless --no-sig specified")
+        sys.exit(1)
     
     # Validate percentage range
     if args.percent is not None and (args.percent < 0 or args.percent > 50):
@@ -469,8 +763,30 @@ Examples:
         print("Error: Quality must be between 1 and 100")
         sys.exit(1)
     
+    # Adjust suffix for no-signature mode
+    suffix = args.suffix
+    if args.no_sig and suffix == "_with_sig":
+        suffix = "_processed"
+    
     # Process the files
-    process_image_files(args.directory, args.signature, args.pixels, args.percent, args.max_dimension, args.suffix, args.force, args.skip_existing, args.format, args.quality, args.exclude_suffix)
+    process_image_files(
+        args.directory, 
+        args.signature, 
+        args.pixels, 
+        args.percent, 
+        args.max_dimension, 
+        suffix, 
+        args.force, 
+        args.skip_existing, 
+        args.output_format, 
+        args.quality, 
+        args.exclude_suffix,
+        apply_signature=not args.no_sig,
+        layers_to_hide=args.hide_layer,
+        crop_portrait_ratio=args.crop_portrait,
+        crop_landscape_ratio=args.crop_landscape,
+        input_formats=args.input_formats
+    )
 
 
 if __name__ == "__main__":

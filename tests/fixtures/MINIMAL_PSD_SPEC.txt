@@ -1,0 +1,33 @@
+
+MINIMAL PSD TEST FILES SPECIFICATION
+
+For comprehensive PSD testing, we need these files:
+
+1. test_simple.psd (50x40 pixels):
+   - Single layer named "Background"
+   - Basic RGB content
+   
+2. test_multilayer.psd (150x120 pixels):
+   - Layer 0: "Background" (base content)  
+   - Layer 1: "Overlay" (can be hidden)
+   - Layer 2: "Draft" (can be hidden)
+   - Layer 3: "Signature" (can be hidden)
+
+3. test_signature.psd (30x20 pixels):
+   - Semi-transparent signature content
+   - Single layer for use as signature
+
+4. test_complex.psd (200x150 pixels):
+   - Multiple layers (5+)
+   - Layer groups (if supported)
+   - Various blend modes
+
+CURRENT WORKAROUND:
+Since we cannot create PSDs programmatically, we'll:
+1. Create comprehensive tests that work with PNG files
+2. Add conditional PSD tests that skip when real PSDs unavailable
+3. Document exactly what PSD features need manual testing
+
+MANUAL CREATION NEEDED:
+Use Photoshop, GIMP, or similar to create the above PSD files
+and place them in tests/fixtures/ directory.

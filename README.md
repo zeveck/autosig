@@ -1,14 +1,31 @@
 # AutoSig
 
-Automatic signature placement tool for batch processing PSD and PNG files. Adds a signature image with customizable positioning and exports the results as PNG files.
+Comprehensive image processing tool for batch processing images in multiple formats. Features signature application, PSD layer manipulation, aspect ratio cropping, format conversion, and multi-format export capabilities.
 
 ## Features
 
-- **Multi-format support**: Process PSD and PNG source files with PSD or PNG signature files
+### Core Processing
+- **Universal format support**: Process PSD, PNG, JPG, JPEG, WEBP, BMP, TIFF, TIF, and GIF files
+- **Format filtering**: Choose specific input formats to process with `--input-formats` 
 - **Flexible positioning**: Position signatures using pixel offsets or percentage-based positioning
 - **Batch processing**: Process entire directories of images at once
-- **Progress tracking**: Visual progress bar shows processing status
+- **Progress tracking**: Visual progress bar shows processing status with Ctrl+C cancellation
+- **Graceful cancellation**: Press Ctrl+C to cancel processing with detailed progress report
 - **Error handling**: Gracefully handles files that can't be processed
+- **Animated GIF support**: Automatically extracts first frame from animated GIFs with warnings
+
+### Advanced Features (v0.3.0+)
+- **No-signature mode**: Process images without signatures for format conversion, resizing, and cropping
+- **PSD layer hiding**: Hide specific layers in PSD files by name or index before processing
+- **Smart aspect ratio cropping**: Apply maximum ratio constraints to prevent overly tall or wide images
+- **Orientation-aware processing**: Different cropping ratios for portrait vs landscape images
+- **Smart input filtering**: Automatically excludes AutoSig output files to prevent exponential file growth
+
+### User Experience Features (v0.3.2+)
+- **Ctrl+C cancellation**: Press Ctrl+C during processing to gracefully cancel with progress report
+- **Immediate cancellation**: Standard KeyboardInterrupt handling for reliable cancellation
+- **Comprehensive reporting**: Shows processed files, remaining files, and skipped files on cancellation
+- **Clean error handling**: Proper cleanup without terminal corruption
 
 ## Installation
 
@@ -57,16 +74,21 @@ python autosig.py psds sigs\justsig.png -pc 3
 | Argument | Short | Type | Default | Description |
 |----------|-------|------|---------|-------------|
 | `directory` | - | string | - | Directory containing PSD/PNG files to process |
-| `signature` | - | string | - | Path to signature file (PSD or PNG) |
+| `signature` | - | string | - | Path to signature file (PSD or PNG) - optional with `--no-sig` |
 | `--pixels` | `-p` | integer | 20 | Pixel offset from right and bottom edges |
 | `--percent` | `-pc` | float | - | Percentage offset from edges (overrides --pixels) |
 | `--max-dimension` | `-md` | integer | - | Maximum size for larger dimension (maintains aspect ratio) |
 | `--suffix` | `-s` | string | `_with_sig` | Suffix to add to output filenames |
-| `--format` | `-fmt` | string | `png` | Output format: png, jpg, webp, tiff |
+| `--output-format` | `-of` | string | `png` | Output format: png, jpg, webp, tiff |
+| `--input-formats` | `-if` | string | `all` | Input formats to process (comma-separated): psd,png,jpg,jpeg,webp,bmp,tiff,tif,gif |
 | `--quality` | `-q` | integer | 85 | Quality for lossy formats (1-100) |
 | `--force` | `-f` | flag | - | Overwrite existing files without prompting |
 | `--skip-existing` | `-se` | flag | - | Skip existing files without prompting |
 | `--exclude-suffix` | `-ex` | string | - | Additional suffix patterns to exclude from input (repeatable) |
+| `--no-sig` | - | flag | - | Process images without signature (format conversion, resizing, cropping) |
+| `--hide-layer` | - | string | - | Hide PSD layer by name or index (repeatable) |
+| `--crop-portrait` | - | string | - | Maximum aspect ratio for portrait/square images (e.g., '4:5') |
+| `--crop-landscape` | - | string | - | Maximum aspect ratio for landscape images (e.g., '16:9') |
 
 ## Examples
 
@@ -122,22 +144,118 @@ python autosig.py images sig.png --suffix ""
 
 ### Output as JPG with default quality
 ```bash
-python autosig.py photos sig.png --format jpg
+python autosig.py photos sig.png --output-format jpg
 ```
 
 ### High quality JPG output
 ```bash
-python autosig.py images sig.png --format jpg --quality 95
+python autosig.py images sig.png --output-format jpg --quality 95
 ```
 
 ### WEBP format for web use
 ```bash
-python autosig.py photos sig.png --format webp --quality 80
+python autosig.py photos sig.png --output-format webp --quality 80
 ```
 
 ### Exclude custom patterns from input
 ```bash
 python autosig.py images sig.png --exclude-suffix "_draft" --exclude-suffix "_backup"
+```
+
+## Advanced Features Examples
+
+### No-Signature Mode (v0.3.0+)
+
+#### Convert formats without signature
+```bash
+python autosig.py psds/ --no-sig --output-format jpg --quality 90
+```
+
+#### Resize and convert PSD to PNG
+```bash
+python autosig.py psds/ --no-sig --max-dimension 2000 --suffix "_converted"
+```
+
+### PSD Layer Hiding (v0.3.0+)
+
+#### Hide layers by name
+```bash
+python autosig.py psds/ sig.png --hide-layer "Signature" --hide-layer "Watermark"
+```
+
+#### Hide layers by index (0-based)
+```bash
+python autosig.py psds/ --no-sig --hide-layer 0 --hide-layer 3
+```
+
+#### Mix layer names and indices
+```bash
+python autosig.py psds/ sig.png --hide-layer "Draft Layer" --hide-layer 5
+```
+
+### Smart Aspect Ratio Cropping (v0.3.0+)
+
+#### Apply different max ratios for portrait vs landscape
+```bash
+python autosig.py photos/ sig.png --crop-portrait 4:5 --crop-landscape 16:9
+```
+
+#### Crop only portrait images to square
+```bash
+python autosig.py images/ sig.png --crop-portrait 1:1
+```
+
+#### Social media batch processing with constraints
+```bash
+python autosig.py photos/ sig.png --crop-portrait 4:5 --crop-landscape 16:9 --max-dimension 1080 --output-format jpg --suffix "_insta"
+```
+
+### Multi-Format Input Support (v0.3.1+)
+
+#### Process only specific formats
+```bash
+# Process only JPEG files
+python autosig.py photos/ sig.png --input-formats jpg
+
+# Process multiple specific formats
+python autosig.py mixed_media/ sig.png --input-formats jpg,png,webp
+```
+
+#### Format conversion workflows
+```bash
+# Convert old formats to modern PNG
+python autosig.py archive/ --no-sig --input-formats bmp,tiff --output-format png
+
+# Batch convert GIFs to static images
+python autosig.py gifs/ --no-sig --input-formats gif --output-format png --suffix "_static"
+```
+
+#### Mixed format processing
+```bash
+# Process all supported formats with different output
+python autosig.py media/ sig.png --output-format webp --quality 85
+
+# Format-specific processing (all formats automatically detected)
+python autosig.py content/ sig.png --hide-layer "Watermark" --output-format jpg
+```
+
+### Complex Workflows (v0.3.0+)
+
+#### Complete image processing pipeline
+```bash
+python autosig.py psds/ sig.png \
+    --hide-layer "Draft" --hide-layer "Notes" \
+    --crop-portrait 4:5 --crop-landscape 16:9 \
+    --max-dimension 2000 \
+    --format jpg --quality 90
+```
+
+#### Pure image processing without signature
+```bash
+python autosig.py psds/ --no-sig \
+    --hide-layer "Watermark" \
+    --crop-landscape 16:9 \
+    --format webp --quality 85
 ```
 
 ## File Support
@@ -183,19 +301,27 @@ AutoSig automatically prevents processing its own output files:
 
 ## How It Works
 
-1. **Scans** the specified directory for PSD and PNG files
-2. **Filters** input files to exclude previous AutoSig outputs
-3. **Loads** the signature file (supports transparency)
-4. **Processes** each image file:
-   - Loads and converts to RGBA format
-   - Resizes image if max-dimension is specified (maintains aspect ratio)
-   - Calculates signature position based on offset settings
-   - Composites signature onto image with alpha blending
-   - Generates output filename with suffix
+1. **Scans** the specified directory for supported image files
+2. **Filters** input files to exclude previous AutoSig outputs  
+3. **Starts** ESC key monitoring for graceful cancellation
+4. **Loads** the signature file if signature mode is enabled (supports transparency)
+5. **Processes** each image file (with cancellation checks):
+   - Loads image and converts to RGBA format
+   - **Hides PSD layers** if `--hide-layer` specified (PSD files only)
+   - **Applies aspect ratio cropping** if `--crop-portrait` or `--crop-landscape` specified
+     - Detects image orientation (portrait/landscape/square)
+     - Only crops images that exceed the maximum ratio constraints
+     - Uses center-aligned cropping to preserve important content
+   - **Applies signature** if not in `--no-sig` mode
+     - Calculates signature position based on offset settings  
+     - Composites signature onto image with alpha blending
+   - **Resizes image** if `--max-dimension` specified (maintains aspect ratio)
+   - Generates output filename with suffix (auto-adjusts to `_processed` for `--no-sig`)
    - Handles file conflicts based on user settings
    - Saves result in specified format (PNG/JPG/WEBP/TIFF)
-5. **Shows progress** with a visual progress bar
-6. **Reports summary** with processed/skipped file counts
+6. **Shows progress** with a visual progress bar (Ctrl+C to cancel)
+7. **Handles cancellation** if Ctrl+C is pressed with detailed report
+8. **Reports summary** with processed/skipped file counts
 
 ## Error Handling
 
@@ -239,11 +365,14 @@ pytest -k "integration"   # Integration tests only
 
 ### Test Coverage
 
-The test suite covers:
-- **Unit tests**: Core functions (positioning, resizing, file handling)
-- **Format tests**: PNG/JPG/WEBP/TIFF output validation
-- **Integration tests**: End-to-end processing with real image files
-- **Error handling**: Invalid inputs and edge cases
+The comprehensive test suite includes **95 tests** with **75% code coverage**:
+- **Unit tests**: Core functions (positioning, resizing, file handling, aspect ratio cropping)
+- **Format tests**: PNG/JPG/WEBP/TIFF output validation with transparency handling
+- **PSD tests**: Real PSD file processing with multi-layer scenarios and layer hiding
+- **Integration tests**: End-to-end processing workflows with complex feature combinations
+- **CLI tests**: Complete command-line validation using subprocess testing
+- **Cancellation tests**: Ctrl+C handling and graceful exit scenarios
+- **Error handling**: Invalid inputs, edge cases, and graceful failure scenarios
 
 ## Credits
 
