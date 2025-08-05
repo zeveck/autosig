@@ -365,7 +365,7 @@ pytest -k "integration"   # Integration tests only
 
 ### Test Coverage
 
-The comprehensive test suite includes **95 tests** with **75% code coverage**:
+The comprehensive test suite includes **95 tests** with **88% code coverage**:
 - **Unit tests**: Core functions (positioning, resizing, file handling, aspect ratio cropping)
 - **Format tests**: PNG/JPG/WEBP/TIFF output validation with transparency handling
 - **PSD tests**: Real PSD file processing with multi-layer scenarios and layer hiding

@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Technical Improvements
 - **🧪 Simplified cancellation system** with reliable KeyboardInterrupt handling
-- **🧪 Updated test coverage**: 95 tests with 75% coverage
+- **🧪 Updated test coverage**: 95 tests with 88% coverage
   - **Cancellation testing** for KeyboardInterrupt handling
   - **Graceful exit testing** with proper cleanup
   - **Removed complex ESC key detection** for better reliability
