@@ -1602,6 +1602,32 @@ class TestCLIMultiFormat:
         # Should fail due to directory not existing, not format parsing
         assert "Directory 'nonexistent' does not exist" in result.stdout
     
+    def test_suffix_empty_argument_parsing(self):
+        """Test that --suffix without value works for no suffix"""
+        import subprocess
+        import sys
+        
+        result = subprocess.run([
+            sys.executable, "autosig.py", "nonexistent", "sig.png", "--suffix"
+        ], capture_output=True, text=True, cwd=".")
+        
+        # Should fail due to directory not existing, not argument parsing
+        assert "expected one argument" not in result.stderr
+        assert "Directory 'nonexistent' does not exist" in result.stdout
+    
+    def test_suffix_empty_string_argument_parsing(self):
+        """Test that --suffix '' also works for no suffix"""
+        import subprocess
+        import sys
+        
+        result = subprocess.run([
+            sys.executable, "autosig.py", "nonexistent", "sig.png", "--suffix", ""
+        ], capture_output=True, text=True, cwd=".")
+        
+        # Should fail due to directory not existing, not argument parsing
+        assert "expected one argument" not in result.stderr
+        assert "Directory 'nonexistent' does not exist" in result.stdout
+
     def test_input_formats_invalid_format(self):
         """Test that invalid input format shows proper error"""
         import subprocess

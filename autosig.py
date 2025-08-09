@@ -663,7 +663,9 @@ Examples:
         "--suffix", "-s",
         type=str,
         default="_with_sig",
-        help="Suffix to add to output filenames (default: '_with_sig')"
+        nargs='?',
+        const="",
+        help="Suffix to add to output filenames (default: '_with_sig'). Use --suffix without value for no suffix."
     )
     
     parser.add_argument(
