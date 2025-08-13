@@ -414,14 +414,14 @@ def resize_image_if_needed(image, max_dimension):
     return image.resize((new_width, new_height), Image.LANCZOS)
 
 
-def process_image_files(directory, signature_path=None, offset_pixels=20, offset_percent=None, max_dimension=None, suffix="_with_sig", force=False, skip_existing=False, output_format="png", quality=85, exclude_patterns=None, apply_signature=True, layers_to_hide=None, crop_portrait_ratio=None, crop_landscape_ratio=None, input_formats=None, sample_size=None):
+def process_image_files(directory, signature_path=None, offset_pixels=70, offset_percent=None, max_dimension=None, suffix="_with_sig", force=False, skip_existing=False, output_format="png", quality=85, exclude_patterns=None, apply_signature=True, layers_to_hide=None, crop_portrait_ratio=None, crop_landscape_ratio=None, input_formats=None, sample_size=None):
     """
     Process image files in the specified directory with optional signature application
     
     Args:
         directory (str): Path to directory containing image files
         signature_path (str): Path to signature file (PSD or PNG) - None if apply_signature=False
-        offset_pixels (int): Pixel offset from right and bottom edges (default: 20)
+        offset_pixels (int): Pixel offset from right and bottom edges (default: 70)
         offset_percent (float): Percentage offset from right and bottom edges (overrides pixels if provided)
         max_dimension (int): Maximum size for larger dimension, maintains aspect ratio (None to skip resizing)
         suffix (str): Suffix to add to output filenames (default: "_with_sig")
@@ -653,8 +653,8 @@ Examples:
     parser.add_argument(
         "--pixels", "-p",
         type=int,
-        default=20,
-        help="Pixel offset from right and bottom edges (default: 20)"
+        default=70,
+        help="Pixel offset from right and bottom edges (default: 70)"
     )
     
     parser.add_argument(

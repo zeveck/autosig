@@ -51,7 +51,7 @@ python autosig.py psds sigs\justsig.png
 
 ### Positioning Options
 
-#### Pixel Offset (Default: 20px)
+#### Pixel Offset (Default: 70px)
 Position the signature with a specific pixel distance from the right and bottom edges:
 
 ```bash
@@ -75,7 +75,7 @@ python autosig.py psds sigs\justsig.png -pc 3
 |----------|-------|------|---------|-------------|
 | `directory` | - | string | - | Directory containing PSD/PNG files to process |
 | `signature` | - | string | - | Path to signature file (PSD or PNG) - optional with `--no-sig` |
-| `--pixels` | `-p` | integer | 20 | Pixel offset from right and bottom edges |
+| `--pixels` | `-p` | integer | 70 | Pixel offset from right and bottom edges |
 | `--percent` | `-pc` | float | - | Percentage offset from edges (overrides --pixels) |
 | `--max-dimension` | `-md` | integer | - | Maximum size for larger dimension (maintains aspect ratio) |
 | `--suffix` | `-s` | string | `_with_sig` | Suffix to add to output filenames |
@@ -93,7 +93,7 @@ python autosig.py psds sigs\justsig.png -pc 3
 
 ## Examples
 
-### Process with default 20px offset
+### Process with default 70px offset
 ```bash
 python autosig.py photos signature.png
 ```
