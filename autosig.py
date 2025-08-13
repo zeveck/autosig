@@ -4,7 +4,7 @@ AutoSig - Automatic signature placement on image files
 Processes images in multiple formats (PSD, PNG, JPG, WEBP, BMP, TIFF, GIF) and adds signatures with customizable positioning and file handling
 """
 
-__version__ = "0.3.2"
+__version__ = "0.3.3"
 
 import os
 import sys
@@ -414,7 +414,7 @@ def resize_image_if_needed(image, max_dimension):
     return image.resize((new_width, new_height), Image.LANCZOS)
 
 
-def process_image_files(directory, signature_path=None, offset_pixels=20, offset_percent=None, max_dimension=None, suffix="_with_sig", force=False, skip_existing=False, output_format="png", quality=85, exclude_patterns=None, apply_signature=True, layers_to_hide=None, crop_portrait_ratio=None, crop_landscape_ratio=None, input_formats=None):
+def process_image_files(directory, signature_path=None, offset_pixels=20, offset_percent=None, max_dimension=None, suffix="_with_sig", force=False, skip_existing=False, output_format="png", quality=85, exclude_patterns=None, apply_signature=True, layers_to_hide=None, crop_portrait_ratio=None, crop_landscape_ratio=None, input_formats=None, sample_size=None):
     """
     Process image files in the specified directory with optional signature application
     
@@ -435,6 +435,7 @@ def process_image_files(directory, signature_path=None, offset_pixels=20, offset
         crop_portrait_ratio (str): Maximum aspect ratio for portrait/square images (e.g., "4:5")
         crop_landscape_ratio (str): Maximum aspect ratio for landscape images (e.g., "16:9")
         input_formats (list): List of input formats to process (default: all supported formats)
+        sample_size (int): Process only the first N files (None to process all)
     """
     if not os.path.exists(directory):
         print(f"Error: Directory '{directory}' does not exist")
@@ -493,7 +494,14 @@ def process_image_files(directory, signature_path=None, offset_pixels=20, offset
         print(f"No {format_names} files found in '{directory}'")
         return
     
-    print(f"Found {len(image_files)} image files to process")
+    # Apply sample size limit if specified
+    total_files = len(image_files)
+    if sample_size and sample_size > 0:
+        image_files = image_files[:sample_size]
+        print(f"Found {total_files} image files, processing first {len(image_files)} as sample")
+    else:
+        print(f"Found {len(image_files)} image files to process")
+    
     print("Press Ctrl+C to cancel processing at any time")
     
     # Track processing results
@@ -626,6 +634,8 @@ Examples:
   python autosig.py images/ --no-sig --crop-portrait 1:1 --output-format jpg
   python autosig.py photos/ sig.png --input-formats jpg,png --output-format webp
   python autosig.py archive/ --no-sig --input-formats bmp,tiff --output-format png
+  python autosig.py images/ sig.png --sample 10  # Test on first 10 files
+  python autosig.py photos/ sig.png --sample 5 --force  # Process first 5 without prompts
         """
     )
     
@@ -734,6 +744,13 @@ Examples:
     )
     
     parser.add_argument(
+        "--sample",
+        type=int,
+        metavar="N",
+        help="Process only the first N files (useful for testing settings)"
+    )
+    
+    parser.add_argument(
         "--version", "-v",
         action="version",
         version=f"AutoSig {__version__}"
@@ -765,6 +782,11 @@ Examples:
         print("Error: Quality must be between 1 and 100")
         sys.exit(1)
     
+    # Validate sample size
+    if args.sample is not None and args.sample <= 0:
+        print("Error: Sample size must be a positive integer")
+        sys.exit(1)
+    
     # Adjust suffix for no-signature mode
     suffix = args.suffix
     if args.no_sig and suffix == "_with_sig":
@@ -787,7 +809,8 @@ Examples:
         layers_to_hide=args.hide_layer,
         crop_portrait_ratio=args.crop_portrait,
         crop_landscape_ratio=args.crop_landscape,
-        input_formats=args.input_formats
+        input_formats=args.input_formats,
+        sample_size=args.sample
     )
 
 

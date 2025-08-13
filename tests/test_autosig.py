@@ -1764,6 +1764,126 @@ class TestIntegrationMultiFormat:
         assert len(png_outputs) == 1  # Only one output file
 
 
+class TestSampleFunctionality:
+    """Test --sample flag functionality"""
+    
+    def test_sample_size_limits_processing(self, tmp_path):
+        """Test that sample_size parameter limits the number of files processed"""
+        from PIL import Image
+        
+        # Create 10 test images
+        for i in range(10):
+            img = Image.new('RGB', (50, 50), 'blue')
+            img.save(tmp_path / f"test_{i:02d}.png")
+        
+        # Create signature in subdirectory to avoid it being counted
+        sig_dir = tmp_path / "sig"
+        sig_dir.mkdir()
+        sig_img = Image.new('RGBA', (10, 10), (255, 0, 0, 128))
+        sig_path = sig_dir / "sig.png"
+        sig_img.save(sig_path)
+        
+        # Process with sample_size=3
+        autosig.process_image_files(
+            str(tmp_path),
+            str(sig_path),
+            sample_size=3,
+            force=True,
+            suffix="_sampled"
+        )
+        
+        # Count processed files
+        processed = list(tmp_path.glob("*_sampled.png"))
+        assert len(processed) == 3, f"Expected 3 files, got {len(processed)}"
+    
+    def test_sample_size_none_processes_all(self, tmp_path):
+        """Test that sample_size=None processes all files"""
+        from PIL import Image
+        
+        # Create 5 test images
+        for i in range(5):
+            img = Image.new('RGB', (50, 50), 'green')
+            img.save(tmp_path / f"image_{i}.png")
+        
+        # Create signature in subdirectory
+        sig_dir = tmp_path / "sig"
+        sig_dir.mkdir(exist_ok=True)
+        sig_img = Image.new('RGBA', (10, 10), (0, 255, 0, 128))
+        sig_path = sig_dir / "signature.png"
+        sig_img.save(sig_path)
+        
+        # Process without sample_size
+        autosig.process_image_files(
+            str(tmp_path),
+            str(sig_path),
+            sample_size=None,
+            force=True,
+            suffix="_all"
+        )
+        
+        # Should process all 5 images
+        processed = list(tmp_path.glob("*_all.png"))
+        assert len(processed) == 5, f"Expected 5 files, got {len(processed)}"
+    
+    def test_sample_size_larger_than_file_count(self, tmp_path):
+        """Test that sample_size larger than file count processes all files"""
+        from PIL import Image
+        
+        # Create only 3 test images
+        for i in range(3):
+            img = Image.new('RGB', (50, 50), 'yellow')
+            img.save(tmp_path / f"pic_{i}.png")
+        
+        # Create signature in subdirectory
+        sig_dir = tmp_path / "sig"
+        sig_dir.mkdir(exist_ok=True)
+        sig_img = Image.new('RGBA', (10, 10), (255, 255, 0, 128))
+        sig_path = sig_dir / "sig.png"
+        sig_img.save(sig_path)
+        
+        # Process with sample_size=10 (larger than actual file count)
+        autosig.process_image_files(
+            str(tmp_path),
+            str(sig_path),
+            sample_size=10,
+            force=True,
+            suffix="_test"
+        )
+        
+        # Should process all 3 available files
+        processed = list(tmp_path.glob("*_test.png"))
+        assert len(processed) == 3, f"Expected 3 files, got {len(processed)}"
+    
+    def test_sample_message_in_output(self, tmp_path, capsys):
+        """Test that sample processing shows appropriate message"""
+        from PIL import Image
+        
+        # Create test images
+        for i in range(8):
+            img = Image.new('RGB', (50, 50), 'cyan')
+            img.save(tmp_path / f"file_{i}.png")
+        
+        # Create signature in subdirectory
+        sig_dir = tmp_path / "sig"
+        sig_dir.mkdir(exist_ok=True)
+        sig_img = Image.new('RGBA', (10, 10), (0, 255, 255, 128))
+        sig_path = sig_dir / "sig.png"
+        sig_img.save(sig_path)
+        
+        # Process with sample_size=4
+        autosig.process_image_files(
+            str(tmp_path),
+            str(sig_path),
+            sample_size=4,
+            force=True,
+            suffix="_msg"
+        )
+        
+        # Check output message
+        captured = capsys.readouterr()
+        assert "Found 8 image files, processing first 4 as sample" in captured.out
+
+
 class TestKeyboardInterruptHandling:
     """Test Ctrl+C cancellation functionality"""
     

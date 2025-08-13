@@ -89,6 +89,7 @@ python autosig.py psds sigs\justsig.png -pc 3
 | `--hide-layer` | - | string | - | Hide PSD layer by name or index (repeatable) |
 | `--crop-portrait` | - | string | - | Maximum aspect ratio for portrait/square images (e.g., '4:5') |
 | `--crop-landscape` | - | string | - | Maximum aspect ratio for landscape images (e.g., '16:9') |
+| `--sample` | - | integer | - | Process only the first N files (useful for testing settings) |
 
 ## Examples
 
@@ -160,6 +161,15 @@ python autosig.py photos sig.png --output-format webp --quality 80
 ### Exclude custom patterns from input
 ```bash
 python autosig.py images sig.png --exclude-suffix "_draft" --exclude-suffix "_backup"
+```
+
+### Test settings on a sample
+```bash
+# Process only the first 10 files to test your settings
+python autosig.py photos sig.png --sample 10 --output-format jpg --quality 90
+
+# Try different settings on just 5 files
+python autosig.py images sig.png --sample 5 --crop-portrait 4:5 --max-dimension 2000
 ```
 
 ## Advanced Features Examples
