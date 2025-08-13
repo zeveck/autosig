@@ -1016,15 +1016,17 @@ class TestIntegrationNewFeatures:
         assert cropped.size == (expected_width, 200)
     
     def test_processing_order_crop_before_signature(self, tmp_path):
-        """Test that cropping happens before signature application"""
+        """Test that cropping happens before signature application and signature is positioned correctly"""
         # Create a tall portrait image that will be cropped
         source_img = Image.new('RGB', (200, 400), 'blue')  # 1:2 ratio
         source_path = tmp_path / "tall_image.png"
         source_img.save(source_path)
         
-        # Create a small signature
-        sig_img = Image.new('RGBA', (20, 15), (255, 0, 0, 128))
-        sig_path = tmp_path / "signature.png"
+        # Create a small signature in subdirectory
+        sig_dir = tmp_path / "sigs"
+        sig_dir.mkdir()
+        sig_img = Image.new('RGBA', (40, 30), (255, 255, 0, 200))  # Yellow signature
+        sig_path = sig_dir / "signature.png"
         sig_img.save(sig_path)
         
         # Process with cropping to 4:5 ratio (0.8) - should crop height first
@@ -1033,6 +1035,7 @@ class TestIntegrationNewFeatures:
             str(sig_path),
             apply_signature=True,
             crop_portrait_ratio="4:5",
+            offset_pixels=20,  # Small offset for testing
             force=True,
             suffix="_test"
         )
@@ -1041,13 +1044,19 @@ class TestIntegrationNewFeatures:
         output_path = tmp_path / "tall_image_test.png"
         assert output_path.exists()
         
-        # Verify image was cropped to 4:5 ratio BEFORE signature application
+        # Verify image was cropped to 4:5 ratio
         result_img = Image.open(output_path)
         expected_height = int(200 / 0.8)  # 250
         assert result_img.size == (200, expected_height)
         
-        # Verify signature was applied to the CROPPED image, not original
-        # (This confirms cropping happened first)
+        # Verify signature is positioned based on CROPPED dimensions
+        # Signature should be at: x = 200 - 40 - 20 = 140, y = 250 - 30 - 20 = 200
+        # Check a pixel in the signature area
+        pixel = result_img.getpixel((160, 210))
+        r, g, b = pixel[:3]
+        # Should have yellow component from signature (blended with blue background)
+        # Yellow (255,255,0) + Blue (0,0,255) = some mix with high R and G
+        assert r >= 180 and g >= 180, f"Signature not found at expected position. Pixel: {pixel}"
 
 
 class TestEdgeCases:

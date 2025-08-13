@@ -542,16 +542,16 @@ def process_image_files(directory, signature_path=None, offset_pixels=70, offset
                 if apply_signature and signature:
                     # Calculate signature position based on offset type
                     if offset_percent is not None:
-                        # Use percentage offset
-                        offset_x = int(source_image.width * (offset_percent / 100))
-                        offset_y = int(source_image.height * (offset_percent / 100))
+                        # Use percentage offset (based on cropped dimensions)
+                        offset_x = int(result_image.width * (offset_percent / 100))
+                        offset_y = int(result_image.height * (offset_percent / 100))
                     else:
                         # Use pixel offset
                         offset_x = offset_pixels
                         offset_y = offset_pixels
                     
-                    sig_x = source_image.width - signature.width - offset_x
-                    sig_y = source_image.height - signature.height - offset_y
+                    sig_x = result_image.width - signature.width - offset_x
+                    sig_y = result_image.height - signature.height - offset_y
                     
                     # Ensure signature fits within image bounds
                     if sig_x < 0 or sig_y < 0:
