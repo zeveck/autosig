@@ -227,6 +227,8 @@ python autosig.py psds/ newsig.png --hide-signature-layer --crop-portrait 4:5 --
 
 **Performance note:** This feature is significantly slower than regular processing because it must test each layer individually by regenerating the PSD composite multiple times. Processing time scales with the number of layers in your PSD files.
 
+**Limitations:** Signature detection is not perfect and will miss some signatures, particularly those embedded within large content layers or in complex compositions. In testing with nearly 1000 files, it achieved ~98% accuracy. For missed signatures or complex cases, use the manual `--hide-layer` option to specify layers by name or index.
+
 ### Smart Aspect Ratio Cropping (v0.3.0+)
 
 #### Apply different max ratios for portrait vs landscape
