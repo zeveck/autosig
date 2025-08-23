@@ -10,10 +10,10 @@ def create_test_fixtures():
     """Create simple test images for testing"""
     fixtures_dir = os.path.dirname(__file__) + "/fixtures"
     
-    # Create a simple test source image (100x80 blue rectangle)
-    source_img = Image.new('RGB', (100, 80), 'lightblue')
+    # Create a simple test source image (200x150 blue rectangle)
+    source_img = Image.new('RGB', (200, 150), 'lightblue')
     draw = ImageDraw.Draw(source_img)
-    draw.rectangle([10, 10, 90, 70], fill='darkblue', outline='navy')
+    draw.rectangle([10, 10, 190, 140], fill='darkblue', outline='navy')
     draw.text((20, 30), "TEST", fill='white')
     source_img.save(f"{fixtures_dir}/test_source.png", "PNG")
     

@@ -87,6 +87,7 @@ python autosig.py psds sigs\justsig.png -pc 3
 | `--exclude-suffix` | `-ex` | string | - | Additional suffix patterns to exclude from input (repeatable) |
 | `--no-sig` | - | flag | - | Process images without signature (format conversion, resizing, cropping) |
 | `--hide-layer` | - | string | - | Hide PSD layer by name or index (repeatable) |
+| `--hide-signature-layer` | - | flag | - | Automatically detect and hide existing signature layers (PSD only, can be slow) |
 | `--crop-portrait` | - | string | - | Maximum aspect ratio for portrait/square images (e.g., '4:5') |
 | `--crop-landscape` | - | string | - | Maximum aspect ratio for landscape images (e.g., '16:9') |
 | `--sample` | - | integer | - | Process only the first N files (useful for testing settings) |
@@ -202,6 +203,29 @@ python autosig.py psds/ --no-sig --hide-layer 0 --hide-layer 3
 ```bash
 python autosig.py psds/ sig.png --hide-layer "Draft Layer" --hide-layer 5
 ```
+
+### Automatic Signature Layer Detection (v0.3.3+)
+
+Automatically detect and hide existing signature layers in PSD files:
+
+```bash
+# Auto-detect and hide signature layers
+python autosig.py psds/ newsig.png --hide-signature-layer
+
+# Combine with manual hiding for additional control
+python autosig.py psds/ newsig.png --hide-signature-layer --hide-layer "Draft"
+
+# Works with all other flags
+python autosig.py psds/ newsig.png --hide-signature-layer --crop-portrait 4:5 --max-dimension 2000
+```
+
+**How it works:**
+- Analyzes small layers (< 15% of image area) anywhere in the image for signature content
+- Tests each layer to see if hiding it removes signature-like content
+- Automatically hides detected signature layers before applying new signature
+- Only works with PSD files (PNG/JPG don't have layers)
+
+**Performance note:** This feature is significantly slower than regular processing because it must test each layer individually by regenerating the PSD composite multiple times. Processing time scales with the number of layers in your PSD files.
 
 ### Smart Aspect Ratio Cropping (v0.3.0+)
 

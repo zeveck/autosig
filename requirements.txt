@@ -1,5 +1,6 @@
 Pillow>=9.0.0
 psd-tools>=1.9.0
 tqdm>=4.64.0
+numpy>=1.20.0
 pytest>=7.0.0
 pytest-cov>=4.0.0

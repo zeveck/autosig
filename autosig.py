@@ -106,13 +106,178 @@ def hide_layers_in_psd(psd, layers_to_hide):
     return hidden_count
 
 
-def load_image_file(file_path, layers_to_hide=None):
+def calculate_image_difference(img1, img2):
+    """
+    Calculate normalized difference between two image regions
+    
+    Args:
+        img1 (PIL.Image): First image to compare
+        img2 (PIL.Image): Second image to compare
+        
+    Returns:
+        float: Normalized difference (0-100 scale)
+    """
+    import numpy as np
+    
+    # Convert to RGB if needed (to ensure same mode)
+    if img1.mode != 'RGB':
+        img1 = img1.convert('RGB')
+    if img2.mode != 'RGB':
+        img2 = img2.convert('RGB')
+    
+    # Convert to numpy arrays as float to avoid uint8 overflow
+    arr1 = np.array(img1, dtype=np.float32)
+    arr2 = np.array(img2, dtype=np.float32)
+    
+    # Calculate mean squared error
+    mse = np.mean((arr1 - arr2) ** 2)
+    
+    # Normalize to 0-100 scale
+    # Max possible MSE is 255^2 = 65025 per channel
+    # But mean across all pixels and channels already accounts for this
+    # So max MSE is just 255^2 when comparing black vs white
+    normalized = (mse / (255 * 255)) * 100
+    
+    return normalized
+
+
+def likely_has_signature(corner_region):
+    """
+    Check if corner region likely contains a signature
+    
+    Args:
+        corner_region (PIL.Image): Corner region to analyze
+        
+    Returns:
+        bool: True if likely contains signature content
+    """
+    import numpy as np
+    
+    # Convert to grayscale for analysis
+    gray = corner_region.convert('L')
+    pixels = np.array(gray)
+    
+    # Check for high contrast areas (signatures usually have text/graphics)
+    std_dev = np.std(pixels)
+    
+    # If standard deviation > threshold, likely has content
+    # Lower threshold to 10 to catch low-contrast signatures
+    # Most signatures will have at least this much variation
+    return std_dev > 10
+
+
+def detect_and_hide_signature_layers(psd, check_region_size=None):
+    """
+    Automatically detect and hide layers containing signatures
+    
+    Args:
+        psd (PSDImage): PSD file object
+        check_region_size (tuple): Deprecated - kept for compatibility
+        
+    Returns:
+        tuple: (signature_layers_hidden, originally_hidden, signature_detected_but_not_hideable)
+    """
+    import numpy as np
+    from contextlib import redirect_stderr, redirect_stdout
+    from io import StringIO
+    from tqdm import tqdm
+    
+    # Silence PSD warnings during composite operations
+    with redirect_stderr(StringIO()), redirect_stdout(StringIO()):
+        # Get reference image with all currently visible layers
+        reference = psd.composite(force=True)
+    
+    width, height = reference.size
+    image_area = width * height
+    
+    # Track layer states
+    originally_hidden = []
+    signature_layers = []
+    
+    # Record originally hidden layers
+    for i, layer in enumerate(psd):
+        if not layer.is_visible():
+            originally_hidden.append(i)
+    
+    # Test each visible layer - looking for small layers anywhere in the image
+    for i, layer in enumerate(psd):
+        if i in originally_hidden:
+            continue  # Skip already hidden layers
+        
+        # Check layer bounds to see if it's likely a signature
+        is_signature_sized = False
+        
+        if hasattr(layer, 'bbox') and layer.bbox:
+            x1, y1, x2, y2 = layer.bbox
+            layer_width = x2 - x1
+            layer_height = y2 - y1
+            layer_area = layer_width * layer_height
+            
+            # Calculate layer size as percentage of image
+            layer_size_percent = (layer_area / image_area) * 100
+            
+            # Signatures are typically small (< 15% of image area)
+            # We're being a bit more generous than before (was 10%)
+            is_signature_sized = layer_size_percent < 15
+            
+            # Skip very large layers early (optimization)
+            if layer_size_percent > 50:
+                continue  # Definitely not a signature
+        
+        # Temporarily hide this layer
+        layer.visible = False
+        
+        try:
+            with redirect_stderr(StringIO()), redirect_stdout(StringIO()):
+                test_image = psd.composite(force=True)
+            
+            # Calculate difference in the region where the layer exists
+            # This gives us better sensitivity for small layers
+            if hasattr(layer, 'bbox') and layer.bbox:
+                x1, y1, x2, y2 = layer.bbox
+                # Crop to layer bounds for comparison
+                ref_crop = reference.crop((x1, y1, x2, y2))
+                test_crop = test_image.crop((x1, y1, x2, y2))
+                diff = calculate_image_difference(ref_crop, test_crop)
+            else:
+                # No bbox, check entire image
+                diff = calculate_image_difference(reference, test_image)
+            
+            # Decision logic:
+            # - Small layers (< 15% of image) with ANY detectable change (>0.01%) are likely signatures
+            # - Medium layers (15-50% of image) need moderate change (5-25%) to be considered
+            # - Large layers (> 50%) are never considered signatures
+            
+            if is_signature_sized and diff > 0.01:
+                signature_layers.append(i)
+                # Keep it hidden
+            elif not is_signature_sized and layer_size_percent < 50 and 5.0 < diff < 25.0:
+                # Medium-sized layer with moderate change might be signature
+                signature_layers.append(i)
+                # Keep it hidden
+            else:
+                # Restore the layer - either no significant change or too large a change
+                layer.visible = True
+                
+        except Exception:
+            # If something goes wrong, restore the layer
+            layer.visible = True
+    
+    # Since we're no longer checking a specific region, we can't detect
+    # "signature present but not hideable" - we just report what we found
+    signature_not_hideable = False
+    
+    return signature_layers, originally_hidden, signature_not_hideable
+
+
+def load_image_file(file_path, layers_to_hide=None, auto_hide_signature=False):
     """
     Load an image file in any supported format and return as PIL Image
     
     Args:
         file_path (str): Path to image file (PSD, PNG, JPG, WEBP, BMP, TIFF, GIF)
         layers_to_hide (list): List of layer names or indices to hide (PSD only)
+        auto_hide_signature (bool): Automatically detect and hide signature layers (PSD only)
         
     Returns:
         PIL.Image: Loaded image in RGBA format
@@ -135,7 +300,15 @@ def load_image_file(file_path, layers_to_hide=None):
                 if hidden_count > 0:
                     tqdm.write(f"Hidden {hidden_count} layer(s) in {Path(file_path).name}")
             
-            return psd.composite().convert("RGBA")
+            # Auto-detect and hide signature layers if requested
+            if auto_hide_signature:
+                sig_layers, orig_hidden, not_hideable = detect_and_hide_signature_layers(psd)
+                
+                # Warn if signature detected but couldn't be hidden
+                if not_hideable:
+                    tqdm.write(f"Warning: Possible signature detected in {Path(file_path).name} but no hideable layer found")
+            
+            return psd.composite(force=True).convert("RGBA")
     else:
         # Non-PSD files don't have layers, ignore layer hiding
         if layers_to_hide:
@@ -414,7 +587,7 @@ def resize_image_if_needed(image, max_dimension):
     return image.resize((new_width, new_height), Image.LANCZOS)
 
 
-def process_image_files(directory, signature_path=None, offset_pixels=70, offset_percent=None, max_dimension=None, suffix="_with_sig", force=False, skip_existing=False, output_format="png", quality=85, exclude_patterns=None, apply_signature=True, layers_to_hide=None, crop_portrait_ratio=None, crop_landscape_ratio=None, input_formats=None, sample_size=None):
+def process_image_files(directory, signature_path=None, offset_pixels=70, offset_percent=None, max_dimension=None, suffix="_with_sig", force=False, skip_existing=False, output_format="png", quality=85, exclude_patterns=None, apply_signature=True, layers_to_hide=None, crop_portrait_ratio=None, crop_landscape_ratio=None, input_formats=None, sample_size=None, auto_hide_signature=False):
     """
     Process image files in the specified directory with optional signature application
     
@@ -436,6 +609,7 @@ def process_image_files(directory, signature_path=None, offset_pixels=70, offset
         crop_landscape_ratio (str): Maximum aspect ratio for landscape images (e.g., "16:9")
         input_formats (list): List of input formats to process (default: all supported formats)
         sample_size (int): Process only the first N files (None to process all)
+        auto_hide_signature (bool): Automatically detect and hide signature layers in PSD files
     """
     if not os.path.exists(directory):
         print(f"Error: Directory '{directory}' does not exist")
@@ -515,7 +689,7 @@ def process_image_files(directory, signature_path=None, offset_pixels=70, offset
             
             try:
                 # Load image file with layer hiding if specified
-                source_image = load_image_file(image_file, layers_to_hide)
+                source_image = load_image_file(image_file, layers_to_hide, auto_hide_signature)
                 
                 # Create a copy of the original image for processing
                 result_image = source_image.copy()
@@ -732,6 +906,12 @@ Examples:
     )
     
     parser.add_argument(
+        "--hide-signature-layer",
+        action="store_true",
+        help="Automatically detect and hide existing signature layers in PSD files"
+    )
+    
+    parser.add_argument(
         "--crop-portrait",
         type=str,
         help="Maximum aspect ratio for portrait/square images (e.g., '4:5')"
@@ -810,7 +990,8 @@ Examples:
         crop_portrait_ratio=args.crop_portrait,
         crop_landscape_ratio=args.crop_landscape,
         input_formats=args.input_formats,
-        sample_size=args.sample
+        sample_size=args.sample,
+        auto_hide_signature=args.hide_signature_layer
     )
 
 

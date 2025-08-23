@@ -186,7 +186,7 @@ class TestErrorHandling:
     def test_load_image_file_unknown_extension(self):
         """Test loading file with unknown extension defaults to PIL"""
         # Create a simple PNG but save with unknown extension
-        img = Image.new('RGB', (50, 50), 'red')
+        img = Image.new('RGB', (200, 200), 'red')
         with tempfile.NamedTemporaryFile(suffix='.unknown', delete=False) as f:
             temp_path = f.name
         
@@ -277,7 +277,7 @@ class TestProcessImageFiles:
         
         # Verify it's a valid image
         result_img = Image.open(output_path)
-        assert result_img.size == (100, 80)  # Same as source
+        assert result_img.size == (200, 150)  # Same as source
         
         captured = capsys.readouterr()
         assert "Found 1 image files to process" in captured.out
@@ -428,7 +428,7 @@ class TestIntegration:
         result = autosig.load_image_file(source_image_path)
         assert isinstance(result, Image.Image)
         assert result.mode == 'RGBA'
-        assert result.size == (100, 80)
+        assert result.size == (200, 150)
     
     def test_signature_positioning_pixels(self, fixtures_dir):
         """Test signature positioning with pixel offset"""
@@ -439,8 +439,8 @@ class TestIntegration:
         sig_x = source_img.width - sig_img.width - 20
         sig_y = source_img.height - sig_img.height - 20
         
-        expected_x = 100 - 20 - 20  # source_width - sig_width - offset
-        expected_y = 80 - 15 - 20   # source_height - sig_height - offset
+        expected_x = 200 - 20 - 20  # source_width - sig_width - offset
+        expected_y = 150 - 15 - 20   # source_height - sig_height - offset
         
         assert sig_x == expected_x
         assert sig_y == expected_y
@@ -458,8 +458,8 @@ class TestIntegration:
         sig_x = source_img.width - sig_img.width - offset_x
         sig_y = source_img.height - sig_img.height - offset_y
         
-        expected_offset_x = int(100 * 0.05)  # 5
-        expected_offset_y = int(80 * 0.05)   # 4
+        expected_offset_x = int(200 * 0.05)  # 10
+        expected_offset_y = int(150 * 0.05)   # 7
         
         assert offset_x == expected_offset_x
         assert offset_y == expected_offset_y
@@ -968,7 +968,7 @@ class TestLayerHiding:
     def test_layer_hiding_integration(self, tmp_path):
         """Test layer hiding integration in processing pipeline"""
         # Create PNG source (layer hiding will be ignored but shouldn't break)
-        source_img = Image.new('RGB', (100, 80), 'yellow')
+        source_img = Image.new('RGB', (200, 150), 'yellow')
         source_path = tmp_path / "test_image.png"
         source_img.save(source_path)
         
@@ -991,7 +991,7 @@ class TestLayerHiding:
         assert output_path.exists()
         
         result_img = Image.open(output_path)
-        assert result_img.size == (100, 80)
+        assert result_img.size == (200, 150)
 
 
 class TestIntegrationNewFeatures:
@@ -1486,7 +1486,7 @@ class TestPSDIntegrationScenarios:
         ]
         
         for filename, format_type in files_to_create:
-            img = Image.new('RGB', (80, 60), 'purple')
+            img = Image.new('RGB', (200, 150), 'purple')
             img.save(tmp_path / filename, format_type)
         
         # Create signature that will fit
@@ -1513,12 +1513,12 @@ class TestPSDIntegrationScenarios:
             assert output_path.exists()
             
             result_img = Image.open(output_path)
-            assert result_img.size == (80, 60)
+            assert result_img.size == (200, 150)
     
     def test_invalid_psd_file_handling(self, tmp_path, capsys):
         """Test handling of invalid PSD files in processing"""
         # Create PNG with .psd extension (invalid PSD)
-        img = Image.new('RGB', (100, 80), 'orange')
+        img = Image.new('RGB', (200, 150), 'orange')
         invalid_psd_path = tmp_path / "invalid.psd"
         img.save(invalid_psd_path, "PNG")
         
@@ -1782,7 +1782,7 @@ class TestSampleFunctionality:
         
         # Create 10 test images
         for i in range(10):
-            img = Image.new('RGB', (50, 50), 'blue')
+            img = Image.new('RGB', (200, 200), 'blue')
             img.save(tmp_path / f"test_{i:02d}.png")
         
         # Create signature in subdirectory to avoid it being counted
@@ -1811,7 +1811,7 @@ class TestSampleFunctionality:
         
         # Create 5 test images
         for i in range(5):
-            img = Image.new('RGB', (50, 50), 'green')
+            img = Image.new('RGB', (200, 200), 'green')
             img.save(tmp_path / f"image_{i}.png")
         
         # Create signature in subdirectory
@@ -1840,7 +1840,7 @@ class TestSampleFunctionality:
         
         # Create only 3 test images
         for i in range(3):
-            img = Image.new('RGB', (50, 50), 'yellow')
+            img = Image.new('RGB', (200, 200), 'yellow')
             img.save(tmp_path / f"pic_{i}.png")
         
         # Create signature in subdirectory
@@ -1869,7 +1869,7 @@ class TestSampleFunctionality:
         
         # Create test images
         for i in range(8):
-            img = Image.new('RGB', (50, 50), 'cyan')
+            img = Image.new('RGB', (200, 200), 'cyan')
             img.save(tmp_path / f"file_{i}.png")
         
         # Create signature in subdirectory
@@ -1893,6 +1893,102 @@ class TestSampleFunctionality:
         assert "Found 8 image files, processing first 4 as sample" in captured.out
 
 
+class TestAutoHideSignatureLayer:
+    """Test automatic signature layer detection functionality"""
+    
+    def test_calculate_image_difference_identical(self):
+        """Test that identical images have zero difference"""
+        from PIL import Image
+        
+        img1 = Image.new('RGB', (200, 200), 'red')
+        img2 = Image.new('RGB', (200, 200), 'red')
+        
+        diff = autosig.calculate_image_difference(img1, img2)
+        assert diff == 0.0, f"Identical images should have 0 difference, got {diff}"
+    
+    def test_calculate_image_difference_opposite(self):
+        """Test that opposite images have maximum difference"""
+        from PIL import Image
+        
+        img1 = Image.new('RGB', (200, 200), 'white')
+        img2 = Image.new('RGB', (200, 200), 'black')
+        
+        diff = autosig.calculate_image_difference(img1, img2)
+        assert diff == 100.0, f"Opposite images should have 100% difference, got {diff}"
+    
+    def test_calculate_image_difference_partial(self):
+        """Test that partially different images have intermediate difference"""
+        from PIL import Image
+        
+        img1 = Image.new('RGB', (200, 200), (100, 100, 100))
+        img2 = Image.new('RGB', (200, 200), (150, 150, 150))
+        
+        diff = autosig.calculate_image_difference(img1, img2)
+        assert 2 < diff < 6, f"Partially different images should have moderate difference, got {diff}"
+    
+    def test_likely_has_signature_blank(self):
+        """Test that blank regions are not detected as signatures"""
+        from PIL import Image
+        
+        blank = Image.new('RGB', (250, 150), 'white')
+        has_sig = autosig.likely_has_signature(blank)
+        assert not has_sig, "Blank region should not be detected as having signature"
+    
+    def test_likely_has_signature_with_content(self):
+        """Test that regions with high contrast are detected as signatures"""
+        from PIL import Image, ImageDraw
+        
+        img = Image.new('RGB', (250, 150), 'white')
+        draw = ImageDraw.Draw(img)
+        draw.rectangle([50, 50, 200, 100], fill='black')
+        draw.text((60, 65), "SIGNATURE", fill='white')
+        
+        has_sig = autosig.likely_has_signature(img)
+        assert has_sig, "High-contrast region should be detected as having signature"
+    
+    def test_command_line_argument_exists(self):
+        """Test that --hide-signature-layer argument exists"""
+        import subprocess
+        import sys
+        
+        result = subprocess.run(
+            [sys.executable, "autosig.py", "--help"],
+            capture_output=True,
+            text=True
+        )
+        
+        assert "--hide-signature-layer" in result.stdout, "Missing --hide-signature-layer in help"
+    
+    def test_png_files_ignore_auto_hide(self, tmp_path):
+        """Test that PNG files don't trigger signature layer detection"""
+        from PIL import Image, ImageDraw
+        
+        # Create PNG with signature-like content
+        img = Image.new('RGB', (400, 300), 'white')
+        draw = ImageDraw.Draw(img)
+        draw.rectangle([250, 200, 390, 290], fill='black')
+        img.save(tmp_path / "test.png")
+        
+        # Create signature
+        sig_dir = tmp_path / "sigs"
+        sig_dir.mkdir()
+        sig = Image.new('RGBA', (50, 30), (255, 0, 0, 200))
+        sig.save(sig_dir / "sig.png")
+        
+        # Process with auto_hide_signature=True (should be ignored for PNG)
+        autosig.process_image_files(
+            str(tmp_path),
+            str(sig_dir / "sig.png"),
+            force=True,
+            suffix="_test",
+            auto_hide_signature=True
+        )
+        
+        # Should process without errors
+        output = tmp_path / "test_test.png"
+        assert output.exists(), "Output file should be created"
+
+
 class TestKeyboardInterruptHandling:
     """Test Ctrl+C cancellation functionality"""
     
@@ -1902,7 +1998,7 @@ class TestKeyboardInterruptHandling:
         import unittest.mock
         
         # Create test files
-        base_img = Image.new('RGB', (50, 50), 'blue')
+        base_img = Image.new('RGB', (200, 200), 'blue')
         test_file = tmp_path / "test.png"
         base_img.save(test_file)
         
